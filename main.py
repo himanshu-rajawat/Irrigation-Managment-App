@@ -1,15 +1,16 @@
 from flask import Flask, jsonify, request, make_response, render_template
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
-# from flask_restful import Resource, Api, reqparse, fields, marshal_with
-# from flask_cors import CORS, cross_origin
-# from functools import wraps
-# import jwt
+from flask_restful import Resource, Api, reqparse, fields, marshal_with
+from flask_cors import CORS, cross_origin
+from functools import wraps
+import jwt
 
 app = Flask(__name__)
 bcrypt = Bcrypt(app)
-# CORS(app)
+CORS(app)
 db = SQLAlchemy(app)
+api = Api(app)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.sqlite3'
 app.config['SECRET_KEY'] = 'SECRET_KEY'
@@ -89,6 +90,12 @@ user_login_args = reqparse.RequestParser()
 user_login_args.add_argument("contact_number")
 user_login_args.add_argument("password")
 
+create_crop_args = reqparse.RequestParser()
+create_crop_args.add_argument("crop_name")
+
+delete_crop_args = reqparse.RequestParser()
+delete_crop_args.add_argument("crop_name")
+
 class UserRegistrationAPI(Resource):
     def post(self):
         args = user_registration_args.parse_args()
@@ -130,5 +137,49 @@ class UserLoginAPI(Resource):
 class UserDashboardAPI(Resource):
     @token_required
     def get(current_user,self):
-        data_object = Data.query.filter_by(user_id=current_user.user_id).first()
-        current_moisture = Data
+        data_objects = Data.query.filter_by(user_id=current_user.user_id).all()
+        response = {}
+        username = current_user.username
+        response['username'] = username
+        for object in data_objects:
+            current_moisture = object.moisture_content
+            crop_name = object.crop_id.crop_name
+            ideal_lower = object.crop_id.ideal_lower
+            ideal_higher = object.crop_id.ideal_higher
+            response[crop_name] = {'current_moisture':current_moisture,'ideal_lower':ideal_lower,'ideal_higher':ideal_higher}
+        return jsonify(response)
+
+class CreateCropAPI(Resource):
+    @token_required
+    def post(current_user,self):
+        args = create_crop_args.parse_args()
+        crop_name = args.get("crop_name",None)
+        crop_id = Crop.query.filter_by(crop_name=crop_name).first().crop_id
+        try:
+            new_data_object = Data(user_id = current_user.id,crop_id = crop_id)
+            db.session.add(new_data_object)
+            db.session.commit()
+            return make_response(jsonify({"crop_name": crop_name, "username": current_user.name}),200)
+        except:
+            res = jsonify({"message":"this crop already exists"})
+            return make_response(res,500)
+
+class DeleteCropAPI(Resource):
+    @token_required
+    def delete(current_user,self):
+        args = delete_crop_args.parse_args()
+        crop_name = args.get("crop_name",None)
+        crop_id = Crop.query.filter_by(crop_name=crop_name).first().crop_id
+        data_object = Data.query.filter_by(crop_id = crop_id).first()
+        db.session.delete(data_object)
+        sb.session.commit()
+        return make_response(jsonify({"crop_name": crop_name, "username": current_user.name}),200)
+
+api.add_resource(UserRegistrationAPI,"/signupapi")
+api.add_resource(UserLoginAPI,"/loginapi")
+api.add_resource(UserDashboardAPI,"/dashboardapi")
+api.add_resource(CreateCropAPI,"/createcropapi")
+api.add_resource(DeleteCropAPI,"/deletecropapi")
+
+if __name__ == '__main__':
+    app.run(debug = True)
